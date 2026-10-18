@@ -8,7 +8,7 @@ Magic Mirror is an augmented-reality (AR) mirror that runs in a web browser. It 
 
 Made by **Hussein Mayladan** ([@HusseinMayla](https://github.com/HusseinMayla)) and **Nour Al Shami** ([@Nan0dev06](https://github.com/Nan0dev06)).
 
-**Runs on:** any graphics card, at about 30 FPS even on an entry-level one · CPU only, at a lower frame rate · Chrome or Edge · fully offline
+**Runs on:** any graphics card, at about 30 FPS even on an entry-level one · CPU only, at a lower frame rate · Chrome, OperaGX or edge · fully offline
 
 ---
 
