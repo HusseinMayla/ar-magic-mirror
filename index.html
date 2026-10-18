@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Magic Mirror</title>
+    <style>
+      /* Fonts are bundled in public/fonts so the booth works offline */
+      @font-face {
+        font-family: "Cormorant Garamond";
+        font-style: normal;
+        font-weight: 300 600;
+        font-display: swap;
+        src: url("/fonts/cormorant-garamond-latin.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Cormorant Garamond";
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/fonts/cormorant-garamond-latin-italic.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Lora";
+        font-style: normal;
+        font-weight: 400 600;
+        font-display: swap;
+        src: url("/fonts/lora-latin.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "Lora";
+        font-style: italic;
+        font-weight: 400;
+        font-display: swap;
+        src: url("/fonts/lora-latin-italic.woff2") format("woff2");
+      }
+
+      /* Gilded Frame design tokens */
+      :root {
+        --gold: #d4a85f;
+        --gold-line: rgba(212, 168, 95, 0.65);
+        --gold-soft: rgba(212, 168, 95, 0.45);
+        --gold-faint: rgba(212, 168, 95, 0.18);
+        --ink: #f3f2f2;
+        --ink-2: #cfc8bd;
+        --glass: rgba(20, 17, 13, 0.72); /* handoff says .6; deeper so pills stay smoked, not grey, over a bright hall */
+        --panel: rgba(24, 20, 15, 0.82);
+        --scrim-light: rgba(14, 12, 10, 0.5);
+        --scrim: rgba(14, 12, 10, 0.8);
+        --night: #100e0b;
+        --night-deep: #0e0c0a;
+        --staff-panel: rgba(20, 17, 13, 0.92);
+
+        --font-display: "Cormorant Garamond", Garamond, Georgia, serif;
+        --font-body: "Lora", Georgia, serif;
+        --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+        --ease-out: cubic-bezier(0.2, 0.8, 0.25, 1);
+        --text-lift: 0 2px 18px rgba(14, 12, 10, 0.75);
+
+        /* Layers, bottom to top */
+        --z-video: 1;
+        --z-avatar: 3;
+        --z-debug: 5;
+        --z-stage: 10;   /* idle screen, now-wearing */
+        --z-stickers: 12; /* collection sticker sheet: over the costume and the bottom scrim (they only sit at the sides) */
+        --z-hud: 20;     /* gesture pill, telemetry */
+        --z-face: 25;
+        --z-alert: 30;
+        --z-hint: 35;    /* high-five ring */
+        --z-overlay: 40; /* carousel */
+        --z-capture: 46;
+        --z-flash: 47;
+        --z-modal: 48;
+        --z-loading: 55;
+        --z-fx: 56;      /* gesture sparks: above the menu and the loading veil */
+        --z-frame: 58;
+        --z-admin: 60;
+        --z-drawer: 62;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body, html {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: var(--night);
+        font-family: var(--font-ui);
+        color: var(--ink);
+        user-select: none;
+      }
+
+      #mirror-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at center, #1b1915 0%, var(--night-deep) 100%);
+      }
+
+      /* Live mirrored webcam feed */
+      #webcam-video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+        opacity: 0.85;
+        z-index: var(--z-video);
+        transition: opacity 0.3s ease;
+      }
+
+      /* Three.js Canvas for VRM 3D Outfits */
+      #three-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: var(--z-avatar);
+        pointer-events: none;
+      }
+
+      /* 2D Debug Canvas for optional skeletons */
+      #debug-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: var(--z-debug);
+        pointer-events: none;
+        display: none;
+      }
+
+      .icon {
+        display: block;
+        flex: none;
+      }
+
+      /* Collection sticker sheet (src/ui/stickerLayer.ts): fit, never cropped, not mirrored */
+      .sticker-layer {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        z-index: var(--z-stickers);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.35s var(--ease-out);
+      }
+      .sticker-layer.visible {
+        opacity: 1;
+      }
+
+      /* Gesture sparks canvas (src/ui/particles.ts) */
+      .gesture-fx {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: var(--z-fx);
+        pointer-events: none;
+      }
+
+      /* Shared gilded pieces */
+      .kicker {
+        font: 400 22px/1.2 var(--font-body);
+        letter-spacing: 0.34em;
+        padding-left: 0.34em; /* balances the trailing letter-spacing so centred kickers sit centred */
+        text-transform: uppercase;
+        color: var(--gold);
+        text-shadow: var(--text-lift);
+      }
+      .gilded-pill {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--gold-line);
+        border-radius: 999px;
+        background: var(--glass);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+
+      /* Mirror frame: double gold hairline with corner diamonds, on every screen */
+      .mirror-frame {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-frame);
+        pointer-events: none;
+      }
+      .mirror-frame::before,
+      .mirror-frame::after {
+        content: "";
+        position: absolute;
+      }
+      .mirror-frame::before {
+        inset: 28px;
+        border: 1px solid var(--gold);
+        border-radius: 4px;
+      }
+      .mirror-frame::after {
+        inset: 40px;
+        border: 1px solid var(--gold-soft);
+        border-radius: 2px;
+      }
+      .frame-diamond {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        background: var(--gold);
+        transform: rotate(45deg);
+      }
+      .frame-diamond.tl { left: 22px; top: 22px; }
+      .frame-diamond.tr { right: 22px; top: 22px; }
+      .frame-diamond.bl { left: 22px; bottom: 22px; }
+      .frame-diamond.br { right: 22px; bottom: 22px; }
+
+      /* Idle / attract screen: a hologram demo of the steps (src/ui/attractLoop.ts) */
+      #idle-screen {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-stage);
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3vh;
+        padding: 64px 64px 56px;
+        text-align: center;
+        font-family: var(--font-body);
+        /* Dim the hall, but keep it see-through so passers-by notice themselves in the mirror */
+        background:
+          linear-gradient(to top, rgba(14, 12, 10, 0.75), rgba(14, 12, 10, 0.35) 50%, rgba(14, 12, 10, 0.6)),
+          radial-gradient(ellipse at center, rgba(14, 12, 10, 0) 30%, rgba(14, 12, 10, 0.8) 100%);
+        opacity: 0;
+        transition: opacity 0.35s var(--ease-out);
+      }
+      #idle-screen.visible {
+        opacity: 1;
+      }
+      .attract-head {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+      }
+      .idle-title {
+        font: 400 clamp(64px, 11vh, 104px)/1 var(--font-display);
+        color: var(--ink);
+        text-wrap: balance;
+        text-shadow: var(--text-lift);
+      }
+      .attract-sub {
+        font: italic 400 30px/1.3 var(--font-body);
+        color: var(--ink-2);
+        text-shadow: var(--text-lift);
+      }
+      .attract-main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3vh;
+      }
+
+      /* The projector disc: a faint ring with scanlines around the hand */
+      .attract-stage {
+        --stage: min(300px, 36vh);
+        position: relative;
+        width: var(--stage);
+        height: var(--stage);
+        flex: none;
+        border-radius: 50%;
+        background:
+          repeating-linear-gradient(to bottom, rgba(212, 168, 95, 0.07) 0 2px, transparent 2px 6px),
+          radial-gradient(circle, rgba(212, 168, 95, 0.16), rgba(14, 12, 10, 0.55) 70%);
+        animation: holo-flicker 5s steps(1) infinite;
+      }
+      @keyframes holo-flicker {
+        0%, 100% { opacity: 1; }
+        41% { opacity: 0.86; }
+        42% { opacity: 1; }
+        77% { opacity: 0.92; }
+        78% { opacity: 1; }
+      }
+      .attract-scene {
+        position: absolute;
+        inset: 0;
+      }
+      .attract-ring {
+        position: absolute;
+        inset: 0;
+        transform: rotate(-90deg);
+      }
+      .attract-ring circle {
+        fill: none;
+        stroke-width: 1.5;
+      }
+      .attract-ring-base {
+        stroke: var(--gold-soft);
+      }
+      .attract-ring-fill {
+        stroke: var(--gold);
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+      }
+      .attract-glyph {
+        position: absolute;
+        inset: 16%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .holo-glyph {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+      .holo-halo {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 6;
+        stroke-linejoin: round;
+        opacity: 0.22;
+      }
+      .holo-edge {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 2.4;
+        stroke-linejoin: round;
+      }
+      .holo-body {
+        fill: #1f1910;
+      }
+
+      /* Hold: the hand rises in, the ring fills over 3s (like the real hold), then the hand pops */
+      .attract-scene.active .attract-glyph {
+        animation: holo-rise 0.6s var(--ease-out) both, holo-pop 0.5s var(--ease-out) 3.6s;
+      }
+      .attract-scene.active .attract-ring-fill {
+        animation: ring-fill 3s linear 0.6s forwards;
+      }
+      @keyframes holo-rise {
+        from { transform: translateY(18%); opacity: 0; }
+        to { transform: none; opacity: 1; }
+      }
+      @keyframes holo-pop {
+        50% { transform: scale(1.12); }
+      }
+      @keyframes ring-fill {
+        to { stroke-dashoffset: 0; }
+      }
+
+      /* Caption: what to do, and what it does */
+      .attract-caption {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 14px 40px;
+        text-align: left;
+      }
+      .attract-text {
+        font: 400 36px/1.2 var(--font-body);
+        color: var(--ink);
+      }
+      .attract-note {
+        font: italic 400 24px/1.3 var(--font-body);
+        color: var(--gold);
+      }
+
+      /* Coach: someone is here but hasn't started yet. The same tutorial, small, at the bottom */
+      #idle-screen.coach {
+        justify-content: flex-end;
+        padding-bottom: 72px;
+        background: linear-gradient(to top, rgba(14, 12, 10, 0.85), rgba(14, 12, 10, 0) 40%);
+      }
+      #idle-screen.coach .attract-head {
+        display: none;
+      }
+      #idle-screen.coach .attract-main {
+        flex-direction: row;
+        gap: 28px;
+      }
+      #idle-screen.coach .attract-stage {
+        --stage: 170px;
+      }
+
+      /* Peace-sign photo hint during try-on */
+      .now-wearing-hint {
+        margin-top: 14px;
+        gap: 14px;
+        padding: 8px 28px 8px 12px;
+        font: 400 26px/1.2 var(--font-body);
+        color: var(--ink);
+      }
+      .now-wearing-hint .holo-guide {
+        --size: 56px;
+      }
+
+      /* Small looping hologram of a gesture, shown where that gesture is used */
+      .holo-guide {
+        --size: 64px;
+        position: relative;
+        flex: none;
+        width: var(--size);
+        height: var(--size);
+        border-radius: 50%;
+        border: 1px solid var(--gold-soft);
+        background:
+          repeating-linear-gradient(to bottom, rgba(212, 168, 95, 0.07) 0 2px, transparent 2px 5px),
+          radial-gradient(circle, rgba(212, 168, 95, 0.16), rgba(14, 12, 10, 0.55) 70%);
+        overflow: hidden;
+      }
+      .holo-guide-glyph {
+        position: absolute;
+        inset: 16%;
+        display: flex;
+      }
+      .holo-guide .holo-halo {
+        stroke-width: 8;
+      }
+      .holo-guide .holo-edge {
+        stroke-width: 3.5;
+      }
+      .guide-pulse .holo-guide-glyph {
+        animation: guide-pulse 1.8s ease-in-out infinite;
+      }
+      @keyframes guide-pulse {
+        50% { transform: scale(1.1); }
+      }
+      .guide-swipe .holo-guide-glyph {
+        animation: guide-swipe 1.6s ease-in-out infinite alternate;
+      }
+      @keyframes guide-swipe {
+        from { transform: translateX(-16%) rotate(-6deg); }
+        to { transform: translateX(16%) rotate(6deg); }
+      }
+
+      /* Now wearing: outfit name over a bottom scrim during try-on */
+      #now-wearing {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 300px;
+        z-index: var(--z-stage);
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        padding: 0 160px 76px;
+        text-align: center;
+        font-family: var(--font-body);
+        background: linear-gradient(to top, rgba(14, 12, 10, 0.9), rgba(14, 12, 10, 0));
+        opacity: 0;
+        transition: opacity 0.35s var(--ease-out);
+      }
+      #now-wearing.visible {
+        opacity: 1;
+      }
+      #now-wearing .kicker {
+        font-size: 20px;
+        letter-spacing: 0.3em;
+        padding-left: 0.3em;
+      }
+      .now-wearing-name {
+        font: 400 80px/1 var(--font-display);
+        color: var(--ink);
+        text-wrap: balance;
+      }
+      .now-wearing-collection {
+        font: italic 400 28px/1.3 var(--font-body);
+        color: var(--ink-2);
+      }
+
+      /* Face box: gilded "Human detected" frame around each tracked face */
+      .face-box {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: var(--z-face);
+        display: none;
+        pointer-events: none;
+        border: 1.5px solid var(--gold);
+        border-radius: 4px;
+        box-shadow: 0 0 0 1px rgba(14, 12, 10, 0.35), 0 0 24px rgba(212, 168, 95, 0.25);
+        transition: transform 0.08s linear, width 0.08s linear, height 0.08s linear;
+      }
+      .face-box::before {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border: 1px solid var(--gold-soft);
+        border-radius: 2px;
+      }
+      .face-box::after {
+        content: "";
+        position: absolute;
+        inset: -5px;
+        --diamond: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 0 10 5 5 10 0 5Z' fill='%23d4a85f'/%3E%3C/svg%3E");
+        background-image: var(--diamond), var(--diamond), var(--diamond), var(--diamond);
+        background-position: left top, right top, left bottom, right bottom;
+        background-size: 10px 10px;
+        background-repeat: no-repeat;
+      }
+      .face-box-label {
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+        padding: 6px 16px 6px 14px;
+        border: 1px solid var(--gold-line);
+        border-radius: 999px;
+        background: rgba(20, 17, 13, 0.72);
+        font: 400 20px/1.2 var(--font-body);
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .face-box.label-below .face-box-label {
+        bottom: auto;
+        top: 100%;
+        margin: 14px 0 0;
+      }
+      .face-box-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--gold);
+        transform: rotate(45deg);
+        animation: face-dot-pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes face-dot-pulse {
+        50% { opacity: 0.3; }
+      }
+
+      /* Gesture pill: the gesture the student is making right now */
+      #gesture-badge {
+        position: absolute;
+        top: 68px;
+        left: 68px;
+        z-index: var(--z-hud);
+        gap: 14px;
+        padding: 10px 28px 10px 14px;
+        font: 400 30px/1.2 var(--font-body);
+        color: var(--ink);
+        transition: opacity 0.25s var(--ease-out), background-color 0.25s var(--ease-out), color 0.25s var(--ease-out);
+      }
+      #gesture-badge .icon {
+        color: var(--gold);
+        transition: color 0.25s var(--ease-out);
+      }
+      #gesture-badge.is-idle {
+        opacity: 0;
+      }
+      #gesture-badge.active-victory {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: var(--night);
+      }
+      #gesture-badge.active-victory .icon {
+        color: var(--night);
+      }
+
+      /* High-five ring: hold an open palm to open the menu */
+      .highfive-indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 200px;
+        height: 200px;
+        pointer-events: none;
+        z-index: var(--z-hint);
+        font-family: var(--font-body);
+        transition: transform 0.08s ease-out;
+      }
+      .highfive-indicator.hidden {
+        display: none;
+      }
+      .highfive-svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+      }
+      .highfive-bg-circle {
+        fill: var(--glass);
+        stroke: rgba(243, 242, 242, 0.2);
+        stroke-width: 2;
+      }
+      .highfive-fg-circle {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 3.5;
+        stroke-linecap: round;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+        transition: stroke-dashoffset 0.1s linear;
+      }
+      .highfive-content {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        color: var(--gold);
+      }
+      .highfive-glyph {
+        width: 48px;
+        height: 60px;
+        display: flex;
+      }
+      .highfive-text {
+        font: 400 48px/1 var(--font-display);
+        color: var(--ink);
+        font-variant-numeric: lining-nums tabular-nums;
+      }
+      .highfive-label {
+        position: absolute;
+        top: calc(100% + 14px);
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        padding: 6px 18px;
+        border-radius: 999px;
+        background: var(--glass);
+        font: 400 26px/1.2 var(--font-body);
+        color: var(--ink);
+      }
+
+      /* Collection carousel */
+      .coverflow-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-overlay);
+        background: var(--scrim-light);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        font-family: var(--font-body);
+        color: var(--ink);
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.35s var(--ease-out), visibility 0s;
+      }
+      .coverflow-overlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.35s var(--ease-out), visibility 0s linear 0.35s;
+      }
+
+      .coverflow-header {
+        position: absolute;
+        top: 62px;
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        text-align: center;
+        pointer-events: none;
+      }
+      .coverflow-header .kicker {
+        font-size: 18px;
+        text-shadow: var(--text-lift);
+      }
+      .coverflow-title {
+        font: 400 64px/1.05 var(--font-display);
+        color: var(--ink);
+        text-shadow: var(--text-lift);
+      }
+
+      .coverflow-stage {
+        position: absolute;
+        inset: 0;
+      }
+      .coverflow-card {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: transform 0.4s var(--ease-out), opacity 0.4s var(--ease-out);
+      }
+
+      /* Side cards: previous / next collection */
+      .coverflow-card.left,
+      .coverflow-card.right {
+        width: 290px;
+        height: 420px;
+        padding: 22px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        text-align: center;
+        border: 1px solid rgba(212, 168, 95, 0.5);
+        background: rgba(20, 17, 13, 0.72);
+        opacity: 0.6;
+      }
+      .coverflow-card.left {
+        transform: translate(calc(-50% - 345px), calc(-50% + 40px)) perspective(1200px) rotateY(18deg);
+      }
+      .coverflow-card.right {
+        transform: translate(calc(-50% + 345px), calc(-50% + 40px)) perspective(1200px) rotateY(-18deg);
+      }
+      .coverflow-card.left:hover,
+      .coverflow-card.right:hover {
+        opacity: 0.85;
+      }
+      .card-name {
+        font: 400 40px/1.05 var(--font-display);
+        color: var(--ink);
+        text-wrap: balance;
+      }
+      .card-models-count {
+        font: 400 20px/1.2 var(--font-body);
+        color: var(--gold);
+      }
+
+      /* Collection art slot (the category icon until real art exists) */
+      .card-art {
+        width: 100%;
+        flex: 0 0 190px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border: 1px solid rgba(212, 168, 95, 0.25);
+        border-radius: 2px;
+        background:
+          radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--accent, var(--gold)) 24%, transparent), transparent 68%),
+          rgba(14, 12, 10, 0.35);
+        font-size: 84px;
+        line-height: 1;
+      }
+
+      /* Centre card: the collection being chosen */
+      .coverflow-card.center {
+        width: 440px;
+        height: min(540px, calc(100vh - 260px));
+        transform: translate(-50%, calc(-50% + 46px));
+        z-index: 2;
+        background: var(--panel);
+        box-shadow: 0 0 60px rgba(212, 168, 95, 0.18);
+        animation: card-in 0.25s var(--ease-out);
+      }
+      @keyframes card-in {
+        from { opacity: 0.35; }
+      }
+      .card-border-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+      }
+      .card-base-border,
+      .card-progress-border {
+        x: 1.5px;
+        y: 1.5px;
+        width: calc(100% - 3px);
+        height: calc(100% - 3px);
+        rx: 4px;
+        fill: none;
+      }
+      .card-base-border {
+        stroke: rgba(212, 168, 95, 0.35);
+        stroke-width: 1;
+      }
+      .card-progress-border {
+        stroke: var(--gold);
+        stroke-width: 3;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+        transition: stroke-dashoffset 0.08s linear;
+      }
+      .center-content {
+        position: relative;
+        height: 100%;
+        padding: 26px 30px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        text-align: center;
+      }
+      .card-tag {
+        flex: none;
+        padding: 4px 14px 4px calc(14px + 0.24em);
+        border: 1px solid rgba(212, 168, 95, 0.6);
+        border-radius: 999px;
+        font: 400 15px/1.2 var(--font-body);
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .center-content .card-art {
+        flex: 1 1 120px;
+        min-height: 56px;
+        max-height: 120px;
+        font-size: 56px;
+      }
+      .card-name-large {
+        flex: none;
+        font: 400 58px/1 var(--font-display);
+        color: var(--ink);
+        text-wrap: balance;
+      }
+      .card-tagline-large {
+        flex: none;
+        font: italic 400 21px/1.3 var(--font-body);
+        color: var(--ink-2);
+        text-wrap: balance;
+      }
+      .models-grid {
+        flex: none;
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .model-item {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 8px 12px;
+        border-top: 1px solid rgba(212, 168, 95, 0.3);
+        text-align: left;
+      }
+      .chip-slot {
+        flex: none;
+        font: 600 15px/1 var(--font-display);
+        color: var(--gold);
+        font-variant-numeric: lining-nums;
+      }
+      .chip-name {
+        font: 400 22px/1.15 var(--font-body);
+        color: var(--ink);
+      }
+      .select-hint {
+        flex: none;
+        margin-top: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--gold);
+      }
+      .victory-progress-text {
+        font: 400 26px/1.2 var(--font-body);
+        color: var(--ink);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Carousel arrows: always visible, the click alternative to swiping */
+      .carousel-nav-btn {
+        position: absolute;
+        top: 50%;
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        border: 1px solid var(--gold);
+        background: var(--glass);
+        color: var(--gold);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transform: translateY(calc(-50% + 40px));
+        transition: background-color 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+      }
+      .carousel-nav-btn.prev-btn { left: 66px; }
+      .carousel-nav-btn.next-btn { right: 66px; }
+      .carousel-nav-btn:hover {
+        background: var(--gold-faint);
+      }
+      .carousel-nav-btn:active {
+        transform: translateY(calc(-50% + 40px)) scale(0.95);
+      }
+      .carousel-nav-btn:focus-visible,
+      .coverflow-card:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 2px;
+      }
+
+      .coverflow-footer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 36px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 14px;
+        color: var(--gold);
+        pointer-events: none;
+      }
+      .coverflow-footer .holo-guide {
+        --size: 44px;
+      }
+      .coverflow-footer span {
+        font: 400 24px/1.2 var(--font-body);
+        color: var(--ink-2);
+        text-shadow: var(--text-lift);
+      }
+
+      /* Admin trigger: discreet, staff only */
+      .admin-trigger-btn {
+        position: absolute;
+        top: 68px;
+        right: 68px;
+        z-index: var(--z-admin);
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        border: 1px solid rgba(243, 242, 242, 0.25);
+        background: rgba(20, 17, 13, 0.35);
+        color: rgba(243, 242, 242, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
+      }
+      .admin-trigger-btn:hover {
+        color: var(--gold);
+        border-color: var(--gold-line);
+        background: var(--glass);
+      }
+      .admin-trigger-btn:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 2px;
+      }
+
+      /* Slide-out admin drawer (staff only: original layout, gilded colours) */
+      .admin-drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 360px;
+        max-width: 90vw;
+        background: var(--staff-panel);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border-left: 1px solid rgba(212, 168, 95, 0.3);
+        box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6);
+        z-index: var(--z-drawer);
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.35s var(--ease-out);
+      }
+      /* Hidden once it has slid out, so the Tab key can't focus its controls: the browser would scroll
+         the off-screen drawer into view and push the whole mirror sideways */
+      .admin-drawer.closed {
+        transform: translateX(100%);
+        visibility: hidden;
+        transition: transform 0.35s var(--ease-out), visibility 0s 0.35s;
+      }
+
+      .admin-drawer-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 18px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .admin-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--gold);
+      }
+      .admin-close-btn {
+        background: none;
+        border: none;
+        color: var(--ink-2);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 4px;
+        line-height: 1;
+      }
+      .admin-close-btn:hover {
+        color: var(--ink);
+      }
+
+      .admin-drawer-content {
+        padding: 16px 20px;
+        overflow-y: auto;
+        flex: 1;
+      }
+      .admin-section {
+        margin-bottom: 22px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding-bottom: 16px;
+      }
+      .admin-section:last-child {
+        border-bottom: none;
+      }
+      .admin-section-title {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-2);
+        margin-bottom: 12px;
+      }
+
+      .admin-control-row {
+        margin-bottom: 12px;
+      }
+      .label-with-val {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+      .slider-val {
+        font-weight: 700;
+        color: var(--gold);
+      }
+
+      .admin-slider {
+        width: 100%;
+        accent-color: var(--gold);
+        cursor: pointer;
+      }
+      .admin-select {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: var(--ink);
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        outline: none;
+      }
+      .admin-select option {
+        background: #14110d;
+        color: var(--ink);
+      }
+
+      .admin-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+      .admin-toggle {
+        accent-color: var(--gold);
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+      }
+
+      .admin-btn-group {
+        display: flex;
+        gap: 8px;
+      }
+      .admin-action-btn {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: var(--ink);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .admin-action-btn:hover {
+        background: var(--gold-faint);
+        border-color: var(--gold);
+      }
+      .admin-action-btn.danger {
+        border-color: #ef4444;
+        color: #fca5a5;
+      }
+      .admin-action-btn.danger:hover {
+        background: rgba(239, 68, 68, 0.25);
+      }
+
+      /* Telemetry / Performance HUD (staff only) */
+      #perf-hud {
+        position: absolute;
+        top: 144px;
+        left: 68px;
+        z-index: var(--z-hud);
+        background: var(--staff-panel);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(212, 168, 95, 0.3);
+        border-radius: 12px;
+        padding: 14px 18px;
+        font-family: monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        min-width: 290px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        display: none; /* Controlled via Admin Panel */
+      }
+
+      .hud-title {
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--gold);
+        margin-bottom: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .hud-metric {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 2px;
+      }
+
+      .hud-divider {
+        height: 1px;
+        background: rgba(255, 255, 255, 0.1);
+        margin: 6px 0;
+      }
+
+      .hud-val {
+        font-weight: bold;
+        color: #4ade80;
+      }
+      .hud-val.warning { color: #facc15; }
+      .hud-val.danger { color: #f87171; }
+
+      .badge-track {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid #22c55e;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+
+      .badge-search {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid #ef4444;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+
+      /* Loading screen */
+      #status-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-loading);
+        background: var(--night);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 34px;
+        text-align: center;
+        font-family: var(--font-body);
+        transition: opacity 0.4s var(--ease-out);
+      }
+      .loading-diamond {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--gold);
+        transform: rotate(45deg);
+      }
+      .loading-title {
+        font: 400 136px/1 var(--font-display);
+        color: var(--ink);
+      }
+      .loading-rule {
+        position: relative;
+        width: 380px;
+        height: 2px;
+        overflow: hidden;
+        background: rgba(212, 168, 95, 0.25);
+      }
+      .loading-rule::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 45%;
+        background: var(--gold);
+        animation: loading-sweep 1.6s ease-in-out infinite;
+      }
+      @keyframes loading-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(225%); }
+      }
+      #status-text {
+        font: italic 400 30px/1.3 var(--font-body);
+        color: var(--ink-2);
+      }
+
+      /* Health widget (staff only) */
+      #health-widget {
+        position: absolute;
+        top: 68px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: var(--z-alert);
+        min-width: 380px;
+        max-width: 90vw;
+        background: var(--staff-panel);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(239, 68, 68, 0.6);
+        border-radius: 12px;
+        padding: 12px 18px;
+        display: none;
+      }
+      .health-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding-bottom: 6px;
+      }
+      .health-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: #f87171;
+      }
+      #health-dismiss-btn {
+        background: none;
+        border: none;
+        color: var(--ink-2);
+        cursor: pointer;
+      }
+      .subsystem-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 0;
+        font-size: 12px;
+      }
+      .subsystem-message {
+        font-size: 11px;
+        color: var(--ink-2);
+      }
+      .subsystem-badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 8px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .status-healthy { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+      .status-warning { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+      .status-error   { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+      /* Photo countdown */
+      .photo-countdown {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-capture);
+        pointer-events: none;
+        font-family: var(--font-display);
+        background: radial-gradient(ellipse at center, rgba(14, 12, 10, 0.2) 20%, rgba(14, 12, 10, 0.85) 100%);
+        --ring: min(480px, calc(100vh - 290px));
+      }
+      .photo-countdown.hidden {
+        display: none;
+      }
+      .photo-countdown-ring {
+        position: absolute;
+        left: 50%;
+        top: 70px;
+        width: var(--ring);
+        height: var(--ring);
+        transform: translateX(-50%);
+      }
+      .countdown-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+      }
+      .countdown-base {
+        fill: rgba(20, 17, 13, 0.35);
+        stroke: rgba(212, 168, 95, 0.35);
+        stroke-width: 0.4;
+      }
+      .countdown-arc {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 0.9;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 0;
+      }
+      .countdown-arc.tick {
+        animation: countdown-empty 1s linear forwards;
+      }
+      @keyframes countdown-empty {
+        to { stroke-dashoffset: 1; }
+      }
+      .photo-countdown-number {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-bottom: calc(var(--ring) * 0.0625);
+        font-size: calc(var(--ring) * 0.79);
+        font-weight: 300;
+        line-height: 1;
+        color: var(--ink);
+        font-variant-numeric: lining-nums tabular-nums;
+      }
+      .photo-countdown-number.pulse {
+        animation: photo-countdown-pulse 1s var(--ease-out);
+      }
+      @keyframes photo-countdown-pulse {
+        0% { transform: scale(1.25); opacity: 0; }
+        25% { transform: scale(1); opacity: 1; }
+        100% { transform: scale(0.94); opacity: 0.85; }
+      }
+      .photo-countdown-hint {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 96px;
+        text-align: center;
+        font: italic 400 76px/1 var(--font-display);
+        color: var(--ink);
+        text-shadow: var(--text-lift);
+      }
+      .photo-flash {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-flash);
+        background: #ffffff;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .photo-flash.flash {
+        animation: photo-flash 0.6s ease-out;
+      }
+      @keyframes photo-flash {
+        0% { opacity: 0.95; }
+        100% { opacity: 0; }
+      }
+
+      /* Photo + QR */
+      .photo-modal {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-modal);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 64px;
+        padding: 72px;
+        background: var(--scrim);
+        font-family: var(--font-body);
+        color: var(--ink);
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.35s var(--ease-out), visibility 0s;
+      }
+      .photo-modal.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.35s var(--ease-out), visibility 0s linear 0.35s;
+      }
+      .photo-plate {
+        flex: 0 1 auto;
+        min-width: 0;
+        padding: 14px;
+        border: 1px solid var(--gold);
+        border-radius: 2px;
+        background: rgba(243, 242, 242, 0.05);
+      }
+      .photo-modal-image {
+        display: block;
+        width: min(600px, calc(100vw - 640px));
+        height: auto;
+        max-height: calc(100vh - 200px);
+        object-fit: contain;
+      }
+      .photo-qr-panel {
+        flex: none;
+        width: 380px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        text-align: center;
+      }
+      .photo-qr-title {
+        font: 400 54px/1.05 var(--font-display);
+        color: var(--ink);
+        text-wrap: balance;
+      }
+      .photo-qr-frame {
+        width: 280px;
+        height: 280px;
+        padding: 14px;
+        border-radius: 4px;
+        background: var(--ink);
+      }
+      /* Waiting for the upload: an empty gilded frame instead of a blank white square */
+      .photo-qr-frame:has(.photo-qr-image.hidden) {
+        background: rgba(243, 242, 242, 0.06);
+        border: 1px solid var(--gold-soft);
+        animation: qr-wait 1.6s ease-in-out infinite;
+      }
+      @keyframes qr-wait {
+        50% { border-color: rgba(212, 168, 95, 0.15); }
+      }
+      /* No QR code for this photo (offline or no cloud set up): no empty frame waiting forever */
+      .photo-qr-panel.no-qr .photo-qr-frame {
+        display: none;
+      }
+      .photo-qr-image {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .photo-qr-image.hidden {
+        display: none;
+      }
+      .photo-qr-status {
+        font: italic 400 24px/1.3 var(--font-body);
+        color: var(--ink-2);
+        text-wrap: balance;
+      }
+      .photo-modal-close-btn {
+        height: 72px;
+        padding: 0 64px;
+        border: 1.5px solid var(--gold);
+        border-radius: 4px;
+        background: transparent;
+        font: 400 30px/1 var(--font-body);
+        color: var(--ink);
+        cursor: pointer;
+        transition: background-color 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+      }
+      .photo-modal-close-btn:hover {
+        background: var(--gold-faint);
+      }
+      .photo-modal-close-btn:active {
+        transform: scale(0.98);
+      }
+      .photo-modal-close-btn:focus-visible {
+        outline: 2px solid var(--gold);
+        outline-offset: 2px;
+      }
+
+      /* Keep progress rings (they carry state); drop decorative motion */
+      @media (prefers-reduced-motion: reduce) {
+        .attract-stage,
+        .attract-scene.active *,
+        .holo-guide-glyph,
+        .face-box-dot,
+        .photo-qr-frame:has(.photo-qr-image.hidden),
+        .coverflow-card.center {
+          animation: none;
+        }
+        .photo-countdown-number.pulse {
+          animation: none;
+        }
+        .loading-rule::after {
+          animation: none;
+          transform: none;
+        }
+        .coverflow-card,
+        .carousel-nav-btn,
+        .photo-modal-close-btn {
+          transition: opacity 0.2s linear;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="mirror-container">
+      <!-- Loading screen -->
+      <div id="status-overlay">
+        <div class="loading-diamond" aria-hidden="true"></div>
+        <div class="loading-title">Magic Mirror</div>
+        <div class="loading-rule" aria-hidden="true"></div>
+        <div id="status-text" role="status">Starting Magic Mirror...</div>
+      </div>
+
+      <!-- System Health Alert Widget -->
+      <div id="health-widget">
+        <div class="health-header">
+          <span class="health-title">⚠️ Subsystem Recovery Monitor</span>
+          <button id="health-dismiss-btn">✕</button>
+        </div>
+        <div id="subsystem-list"></div>
+      </div>
+
+      <!-- Live Video Feed -->
+      <video id="webcam-video" autoplay playsinline muted></video>
+
+      <!-- Three.js VRM Avatar Canvas -->
+      <canvas id="three-canvas"></canvas>
+
+      <!-- Tracking & Debug Canvas (Optional) -->
+      <canvas id="debug-canvas"></canvas>
+
+      <!-- Idle / attract screen: hologram demo of the steps, filled by src/ui/attractLoop.ts -->
+      <div id="idle-screen"></div>
+
+      <!-- Now wearing (shown during try-on) -->
+      <div id="now-wearing">
+        <div class="kicker">Now wearing</div>
+        <div class="now-wearing-name" id="now-wearing-name"></div>
+        <div class="now-wearing-collection" id="now-wearing-collection"></div>
+        <div class="gilded-pill now-wearing-hint"><span class="now-wearing-hint-icon" id="now-wearing-hint-icon"></span>Hold a peace sign for your photo</div>
+      </div>
+
+      <!-- Face Boxes (one per tracked person, shown until a costume is chosen) -->
+      <div class="face-box"><div class="face-box-label"><span class="face-box-dot"></span>Human detected</div></div>
+      <div class="face-box"><div class="face-box-label"><span class="face-box-dot"></span>Human detected</div></div>
+      <div class="face-box"><div class="face-box-label"><span class="face-box-dot"></span>Human detected</div></div>
+      <div class="face-box"><div class="face-box-label"><span class="face-box-dot"></span>Human detected</div></div>
+
+      <!-- Gesture Pill -->
+      <div id="gesture-badge" class="gilded-pill is-idle">
+        <svg class="icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+        <span id="gesture-name">None</span>
+      </div>
+
+      <!-- Telemetry HUD (Shown when toggled in Admin Panel) -->
+      <div id="perf-hud">
+        <div class="hud-title">
+          <span>Magic Mirror Telemetry</span>
+          <span id="hud-status" style="font-size: 10px; color: #4ade80;">GPU</span>
+        </div>
+        <div class="hud-metric">
+          <span>Overall FPS:</span>
+          <span id="fps-overall" class="hud-val">0</span>
+        </div>
+        <div class="hud-metric">
+          <span>Tracked People:</span>
+          <span id="hud-tracked-people" class="hud-val">0 / 4</span>
+        </div>
+        <div class="hud-metric">
+          <span>Pose Lock State:</span>
+          <span id="hud-lock-state" class="badge-search">SEARCH</span>
+        </div>
+        <div class="hud-divider"></div>
+        <div class="hud-metric">
+          <span>Pose Inference:</span>
+          <span id="fps-pose" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-metric">
+          <span>Gesture Inference:</span>
+          <span id="fps-gesture" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-metric">
+          <span>Kalidokit Solver:</span>
+          <span id="fps-kalidokit" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-metric">
+          <span>Three.js / VRM:</span>
+          <span id="fps-vrm" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-metric">
+          <span>Downscale Copy:</span>
+          <span id="fps-downscale" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-metric" style="font-weight: bold; border-top: 1px dashed rgba(255,255,255,0.15); padding-top: 2px;">
+          <span>Total Frame Time:</span>
+          <span id="fps-total-frame" class="hud-val">0 ms</span>
+        </div>
+        <div class="hud-divider"></div>
+        <div class="hud-metric">
+          <span>Active Collection:</span>
+          <span id="hud-active-category" style="color: var(--gold);">Spider-Verse</span>
+        </div>
+      </div>
+
+      <!-- Gilded mirror frame (above everything students see) -->
+      <div class="mirror-frame" aria-hidden="true">
+        <span class="frame-diamond tl"></span>
+        <span class="frame-diamond tr"></span>
+        <span class="frame-diamond bl"></span>
+        <span class="frame-diamond br"></span>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

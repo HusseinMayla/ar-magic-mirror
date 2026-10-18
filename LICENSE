@@ -1,0 +1,72 @@
+Magic Mirror
+Copyright (c) 2026 Hussein Mayladan and Nour Al Shami
+
+===============================================================================
+WHAT THIS LICENSE COVERS
+===============================================================================
+
+The MIT License at the bottom of this file applies ONLY to the source code we
+wrote: src/, server/, index.html, vite.config.ts and the project configuration
+files.
+
+===============================================================================
+WHAT IT DOES NOT COVER: WE DO NOT OWN THE CHARACTERS
+===============================================================================
+
+None of the following is ours, and none of it is licensed under MIT:
+
+- THE CHARACTERS. Every character the costumes and stickers show, and their
+  names, belong to their respective owners. This includes characters from
+  Spider-Man, Sonic the Hedgehog, SpongeBob SquarePants, Minecraft, Five Nights
+  at Freddy's, Jujutsu Kaisen, One Piece, Adventure Time and The Amazing World
+  of Gumball. They are trademarks and copyrighted works of those owners. We do
+  not own them and claim no rights to them.
+
+- THE COSTUME MODELS (public/assets/costumes/). These are fan-made 3D models
+  by their Sketchfab authors, used under the licenses listed for each one in
+  CREDITS.md (CC BY 4.0, and CC BY-NC-SA 4.0 for Patrick Star). We only
+  converted them to VRM and rigged them.
+
+- THE STICKER SHEETS (public/assets/stickers/). These are collages of
+  character art owned by the characters' rights holders.
+
+- THE PHOTOS AND SCREENSHOTS (docs/). These are included only to show the
+  project and are not licensed for reuse.
+
+- THIRD-PARTY FILES bundled so the app works offline: the MediaPipe models and
+  engine (public/mediapipe/, Apache License 2.0), the fonts (public/fonts/,
+  SIL Open Font License 1.1, see public/fonts/OFL.txt) and the Lucide icons
+  (ISC and MIT, see CREDITS.md).
+
+This is a non-commercial fan project made for school events. It is not
+affiliated with, sponsored by or endorsed by any of the rights holders or
+model authors. Do not use the costumes or stickers for commercial purposes. If
+you reuse this project with these or other characters, getting the rights to
+them is your responsibility.
+
+If you own any of this material and want it removed, open an issue on the
+repository and we will remove it.
+
+===============================================================================
+MIT License (source code only)
+===============================================================================
+
+Copyright (c) 2026 Hussein Mayladan and Nour Al Shami
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

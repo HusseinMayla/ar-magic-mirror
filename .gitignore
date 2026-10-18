@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production build output
+dist/
+dist-ssr/
+*.local
+
+# Environment variables & secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Vite cache & temp files
+.vite/
+
+# TypeScript build info cache
+*.tsbuildinfo
+
+# Editor & IDE configurations
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# Photos taken at events (saved by server/photoUpload.ts)
+/photos/
+
+# Caches
+.eslintcache
+.stylelintcache
+
+# Local tool settings (machine-specific)
+.qodo/
+.claude/
+CLAUDE.md
