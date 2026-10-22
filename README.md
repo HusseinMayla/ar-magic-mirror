@@ -1,4 +1,4 @@
-# Magic Mirror
+# AR Magic Mirror
 
 Magic Mirror is an augmented-reality (AR) mirror that runs in a web browser. It tracks the full bodies of up to four people through a webcam and dresses each of them in a rigged 3D costume that moves with them in real time, over the live camera image. Menus and photos are controlled with hand gestures, and everything runs locally on the laptop, with no server and no internet connection needed.
 
